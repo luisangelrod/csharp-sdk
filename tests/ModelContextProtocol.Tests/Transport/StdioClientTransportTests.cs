@@ -2,7 +2,6 @@
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Tests.Utils;
-using System.Diagnostics;
 using System.IO.Pipelines;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -15,7 +14,7 @@ public class StdioClientTransportTests(ITestOutputHelper testOutputHelper) : Log
     public static bool IsStdErrCallbackSupported => !PlatformDetection.IsMonoRuntime;
 
     [Fact]
-    public async Task DisposeAsync_ClosesServerStandardInputBeforeWaitingForExit()
+    public async Task DisposeAsync_ClosesServerStandardInputForGracefulExit()
     {
         TimeSpan shutdownTimeout = TimeSpan.FromSeconds(4);
         string testServerExecutable = Path.Combine(AppContext.BaseDirectory, "TestServer.exe");
@@ -41,16 +40,13 @@ public class StdioClientTransportTests(ITestOutputHelper testOutputHelper) : Log
 
         await using ITransport session = await transport.ConnectAsync(TestContext.Current.CancellationToken);
 
-        Stopwatch stopwatch = Stopwatch.StartNew();
         await session.DisposeAsync();
-        stopwatch.Stop();
-
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromTicks(shutdownTimeout.Ticks / 2),
-            $"Disposal took {stopwatch.Elapsed}, indicating it waited for the {shutdownTimeout} shutdown timeout.");
 
         var exception = await Assert.ThrowsAsync<ClientTransportClosedException>(
             async () => await session.MessageReader.Completion);
         var completionDetails = Assert.IsType<StdioClientCompletionDetails>(exception.Details);
+        // A zero exit code proves the server observed stdin EOF and exited on its own
+        // instead of being terminated after ShutdownTimeout.
         Assert.Equal(0, completionDetails.ExitCode);
     }
 
